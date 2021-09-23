@@ -114,12 +114,17 @@ fn main() -> ! {
         [0, 0, 0, 1, 1],
     ];
 
+    let size = graphic[0].len();
+    let mut spin = 0;
+    let speed = 100;
+
     loop {
         let button_a_pressed = app::is_result_ok_and_true(button_a.is_low());
         if button_a_pressed {
+            spin += 1;
             for (row, row_led) in row_leds.iter_mut().enumerate() {
                 for (col, col_led) in col_leds.iter_mut().enumerate() {
-                    if graphic[row][col] == 1 {
+                    if graphic[row][(col + spin/speed) % size] == 1 {
                         let _ = row_led.set_high();
                         let _ = col_led.set_low();
                         let _ = row_led.set_low();
