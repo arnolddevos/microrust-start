@@ -41,7 +41,7 @@ impl AsyncStep {
     queue.enqueue(self).ok();
   }
 
-  pub fn dispatch(&self, queue: &AsyncQueue, state: &mut State, handler: &mut dyn CommandHandler) -> bool {
+  pub fn dispatch(&self, queue: &AsyncQueue, state: &mut State, handler: &mut dyn CommandHandler) -> () {
     match self {
       StepUnit { run } => run(),
       StepU32 { run, arg } => run(*arg),
@@ -57,10 +57,8 @@ impl AsyncStep {
           AsyncStep::Perform { command: c }.enqueue(queue)
         }
       },
-      Stop => return false
-    };
-
-    true
+      Stop => ()
+    }
   }
 
   pub fn run_queue_hilo(hi_queue: &AsyncQueue, lo_queue: &AsyncQueue, start: State, handler: &mut dyn CommandHandler) -> State {
@@ -69,13 +67,15 @@ impl AsyncStep {
     
     loop {
       if let Some(step) = hi_queue.dequeue() {
-        if ! step.dispatch(hi_queue, &mut state, handler) { 
-          return state; 
+        match step {
+          Stop => return state,
+          _    => step.dispatch(hi_queue, &mut state, handler) 
         }
       }
       else if let Some(step) = lo_queue.dequeue() {
-        if ! step.dispatch(lo_queue, &mut state, handler) { 
-          return state; 
+        match step {
+          Stop => return state,
+          _    => step.dispatch(lo_queue, &mut state, handler) 
         }
       } else {
         asm::wfi();
@@ -89,8 +89,9 @@ impl AsyncStep {
     
     loop {
       if let Some(step) = queue.dequeue() {
-        if ! step.dispatch(queue, &mut state, handler) { 
-          return state; 
+        match step {
+          Stop => return state,
+          _    => step.dispatch(queue, &mut state, handler) 
         }
       } else {
         asm::wfi();
