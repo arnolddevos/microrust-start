@@ -30,6 +30,10 @@ pub enum AsyncStep {
 
 type AsyncQueue = Q64<AsyncStep>;
 static DEFAULT_ASYNC_QUEUE: AsyncQueue = Q64::new();
+static PRIORITY_ASYNC_QUEUE: AsyncQueue = Q64::new();
+
+use crate::AsyncStep::*;
+use crate::state_machine::*;
 
 impl AsyncStep {
 
@@ -37,43 +41,73 @@ impl AsyncStep {
     queue.enqueue(self).ok();
   }
 
-  pub fn enqueue_default(self) -> () { 
-    self.enqueue(&DEFAULT_ASYNC_QUEUE); 
+  pub fn dispatch(&self, queue: &AsyncQueue, state: &mut State, handler: &mut dyn CommandHandler) -> bool {
+    match self {
+      StepUnit { run } => run(),
+      StepU32 { run, arg } => run(*arg),
+      Step2U32 { run, arg0, arg1 } => run(*arg0, *arg1),
+      Perform { command } =>   handler.handle(command, queue),
+      Notify { event } => {
+        let (o, t) = transition(state, event);
+        match t {
+          Transition::Next(s) => *state = s,
+          Transition::Same => ()
+        }
+        if let Some(c) = o {
+          AsyncStep::Perform { command: c }.enqueue(queue)
+        }
+      },
+      Stop => return false
+    };
+
+    true
   }
 
-  pub fn run_default(start: state_machine::State, handler: &mut dyn state_machine::CommandHandler) -> state_machine::State { 
-    AsyncStep::run_queue(&DEFAULT_ASYNC_QUEUE, start, handler)
-  }
-
-  pub fn run_queue(queue: &AsyncQueue, start: state_machine::State, handler: &mut dyn state_machine::CommandHandler) -> state_machine::State {
-    use crate::AsyncStep::*;
-    use crate::state_machine::*;
+  pub fn run_queue_hilo(hi_queue: &AsyncQueue, lo_queue: &AsyncQueue, start: State, handler: &mut dyn CommandHandler) -> State {
 
     let mut state = start;
     
     loop {
-      if let Some(step) = queue.dequeue() {
-        match step {
-          StepUnit { run } => run(),
-          StepU32 { run, arg } => run(arg),
-          Step2U32 { run, arg0, arg1 } => run(arg0, arg1),
-          Perform { command } =>   handler.handle(&command, queue),
-          Notify { event } => {
-            let (o, t) = transition(&state, &event);
-            match t {
-              Transition::Next(s) => state = s,
-              Transition::Same => ()
-            }
-            if let Some(c) = o {
-              AsyncStep::Perform { command: c }.enqueue(queue)
-            }
-          },
-          Stop => return state
+      if let Some(step) = hi_queue.dequeue() {
+        if ! step.dispatch(hi_queue, &mut state, handler) { 
+          return state; 
+        }
+      }
+      else if let Some(step) = lo_queue.dequeue() {
+        if ! step.dispatch(lo_queue, &mut state, handler) { 
+          return state; 
         }
       } else {
         asm::wfi();
       }
     }
+  }
+
+  pub fn run_queue(queue: &AsyncQueue, start: State, handler: &mut dyn CommandHandler) -> State {
+
+    let mut state = start;
+    
+    loop {
+      if let Some(step) = queue.dequeue() {
+        if ! step.dispatch(queue, &mut state, handler) { 
+          return state; 
+        }
+      } else {
+        asm::wfi();
+      }
+    }
+  }
+
+  pub fn enqueue_default(self) -> () { 
+    self.enqueue(&DEFAULT_ASYNC_QUEUE); 
+  }
+
+  pub fn enqueue_priority(self) -> () { 
+    self.enqueue(&PRIORITY_ASYNC_QUEUE); 
+  }
+
+  pub fn run_default_queues(start: State, handler: &mut dyn CommandHandler) -> State { 
+    AsyncStep::run_queue_hilo(&PRIORITY_ASYNC_QUEUE, &DEFAULT_ASYNC_QUEUE, start, handler)
   }
 }
 
@@ -82,7 +116,6 @@ impl state_machine::EventNotifier for AsyncQueue {
     AsyncStep::Notify { event: e }.enqueue(self)
   }
 }
-
 
 mod state_machine {
 
