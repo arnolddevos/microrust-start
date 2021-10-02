@@ -37,7 +37,7 @@ impl AsyncStep {
     queue.enqueue(self).ok();
   }
 
-  pub fn enqueue_default(self: AsyncStep) -> () { 
+  pub fn enqueue_default(self) -> () { 
     self.enqueue(&DEFAULT_ASYNC_QUEUE); 
   }
 
@@ -58,11 +58,16 @@ impl AsyncStep {
           StepU32 { run, arg } => run(arg),
           Step2U32 { run, arg0, arg1 } => run(arg0, arg1),
           Perform { command } =>   handler.handle(&command, queue),
-          Notify { event } => 
-            match transition(&state, &event) {
+          Notify { event } => {
+            let (o, t) = transition(&state, &event);
+            match t {
               Transition::Next(s) => state = s,
               Transition::Same => ()
-            },
+            }
+            if let Some(c) = o {
+              AsyncStep::Perform { command: c }.enqueue(queue)
+            }
+          },
           Stop => return state
         }
       } else {
@@ -98,6 +103,6 @@ mod state_machine {
     Same
   }
 
-  pub fn transition(_s: &State, _e: &Event) -> Transition { Transition::Same }
+  pub fn transition(_s: &State, _e: &Event) -> (Option<Command>, Transition) { (None, Transition::Same) }
 
 }
